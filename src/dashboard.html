@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CO2 Monitor &mdash; Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f4f8;
+      color: #333;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 14px 22px;
+      margin-bottom: 18px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: #0066B3;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .header-icon svg { width: 20px; height: 20px; }
+    .header-title { font-size: 15px; font-weight: 600; color: #333; }
+    .header-badges { display: flex; gap: 6px; margin-top: 3px; }
+    .badge {
+      font-size: 10px; font-weight: 600; padding: 2px 8px;
+      border-radius: 4px; letter-spacing: 0.03em;
+    }
+    .badge-blue  { background: #e6f0fa; color: #0066B3; }
+    .badge-green { background: #e8f5e9; color: #2e6b30; }
+    .header-right { text-align: right; }
+    .live-wrap { display: flex; align-items: center; gap: 5px; justify-content: flex-end; }
+    .live-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #5CB85C;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .live-txt   { font-size: 11px; color: #2e6b30; font-weight: 600; }
+    .clock      { font-size: 12px; color: #333; margin-top: 2px; font-weight: 500; }
+    .device-id  { font-size: 11px; color: #555; font-weight: 500; }
+
+    /* Top row */
+    .top-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    /* Cards */
+    .card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 24px 22px;
+    }
+    .card-label {
+      font-size: 13px; color: #111;
+      text-transform: uppercase; letter-spacing: 0.07em;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    /* Reading card — centred */
+    .reading-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    .accent-line {
+      width: 36px; height: 3px; border-radius: 2px;
+      background: #0066B3; margin-bottom: 16px;
+      transition: background 0.5s;
+    }
+    .big-number {
+      font-size: 100px; font-weight: 700;
+      color: #0066B3; line-height: 1;
+      transition: color 0.5s;
+    }
+    .big-unit { font-size: 14px; color: #333; margin-top: 8px; font-weight: 500; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 14px; border-radius: 20px;
+      font-size: 13px; font-weight: 600;
+      margin-top: 16px;
+      transition: background 0.5s, color 0.5s;
+    }
+    .pill-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .p-normal  { background: #e8f5e9; color: #1b5e20; }
+    .p-warning { background: #fff8e1; color: #7c4d00; }
+    .p-danger  { background: #ffebee; color: #b71c1c; }
+    .stat-row {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 10px; margin-top: 20px; width: 100%;
+    }
+    .stat {
+      background: #f8f9fa; border-radius: 8px;
+      padding: 10px 12px; text-align: center;
+    }
+    .stat-lbl {
+      font-size: 11px; color: #444;
+      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .stat-val { font-size: 18px; font-weight: 700; color: #111; }
+
+    /* Gauge card — centred, large */
+    .gauge-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 16px;
+    }
+    .gauge-wrap {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* Chart card */
+    .chart-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+    .chart-header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; margin-bottom: 16px;
+    }
+    .chart-sublabel { font-size: 12px; color: #444; margin-top: 2px; font-weight: 500; }
+    .legend { display: flex; gap: 14px; }
+    .leg-item {
+      display: flex; align-items: center;
+      gap: 5px; font-size: 12px; color: #333; font-weight: 500;
+    }
+    .leg-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .chart-footer {
+      margin-top: 10px; padding-top: 10px;
+      border-top: 1px solid #e0e0e0;
+      font-size: 12px; color: #333; font-weight: 500;
+    }
+
+    /* Alert banner */
+    .banner {
+      display: none; padding: 10px 18px;
+      border-radius: 8px; font-size: 13px; font-weight: 600;
+      margin-bottom: 14px; text-align: center;
+    }
+    .banner-danger  { background: #ffebee; color: #b71c1c; display: block; }
+    .banner-warning { background: #fff8e1; color: #7c4d00; display: block; }
+
+    .last-updated {
+      text-align: center; font-size: 12px;
+      color: #444; margin-top: 14px; font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="banner" id="banner"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon">
+        <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="10" cy="10" r="7" stroke="white" stroke-width="1.5"/>
+          <path d="M10 7v3l2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <div class="header-title">CO&#8322; monitor</div>
+        <div class="header-badges">
+          <span class="badge badge-blue">Infineon</span>
+          <span class="badge badge-green">Carenuity</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="live-wrap">
+        <div class="live-dot"></div>
+        <span class="live-txt">live</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="device-id">car-01 &middot; SGP30 &middot; ThingSpeak</div>
+    </div>
+  </div>
+
+  <!-- Top row -->
+  <div class="top-row">
+
+    <!-- Current reading (centred) -->
+    <div class="card reading-card">
+      <div class="card-label">current reading</div>
+      <div class="accent-line" id="accent"></div>
+      <div class="big-number" id="bignum">--</div>
+      <div class="big-unit">parts per million (ppm) eCO&#8322;</div>
+      <div class="pill p-normal" id="pill">
+        <span class="pill-dot" id="pdot" style="background:#5CB85C"></span>
+        <span id="ptext">Loading...</span>
+      </div>
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-lbl">session min</div>
+          <div class="stat-val" id="smin">--</div>
+        </div>
+        <div class="stat">
+          <div class="stat-lbl">session max</div>
+          <div class="stat-val" id="smax">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gauge (centred, large) -->
+    <div class="card gauge-card">
+      <div class="card-label">air quality index</div>
+      <div class="gauge-wrap" style="margin-top: 4px;">
+        <svg id="gsv" viewBox="0 30 220 125" width="100%" style="max-width:420px;">
+          <defs>
+            <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%"   stop-color="#5CB85C"/>
+              <stop offset="50%"  stop-color="#FFA726"/>
+              <stop offset="100%" stop-color="#EC1840"/>
+            </linearGradient>
+          </defs>
+          <!-- Track -->
+          <path d="M 18 130 A 95 95 0 0 1 202 130"
+                fill="none" stroke="#e0e0e0" stroke-width="18" stroke-linecap="round"/>
+          <!-- Faint full arc -->
+          <path d="M 18 130 A 95 95 0 0 1 202 130"
+                fill="none" stroke="url(#arcGrad)" stroke-width="18"
+                stroke-linecap="round" opacity="0.2"/>
+          <!-- Active arc -->
+          <path id="garc" d="M 18 130 A 95 95 0 0 1 202 130"
+                fill="none" stroke="url(#arcGrad)" stroke-width="18"
+                stroke-linecap="round" stroke-dasharray="299" stroke-dashoffset="280"/>
+          <!-- Needle -->
+          <line id="gneedle" x1="110" y1="130" x2="40" y2="75"
+                stroke="#0066B3" stroke-width="3.5" stroke-linecap="round"/>
+          <circle cx="110" cy="130" r="9" fill="#0066B3"/>
+          <circle cx="110" cy="130" r="4" fill="white"/>
+          <!-- Labels -->
+          <text x="14"  y="148" font-size="12" fill="#111"
+                font-family="Arial,sans-serif" font-weight="700">Good</text>
+          <text x="160" y="148" font-size="12" fill="#b71c1c"
+                font-family="Arial,sans-serif" font-weight="700">Danger</text>
+          <!-- Reading removed - shown in current reading card -->
+        </svg>
+        <div style="display:flex;justify-content:space-between;
+                    width:100%;max-width:420px;padding:0 6px;margin-top:2px;">
+          <span style="font-size:11px;color:#333;font-weight:600;">400</span>
+          <span style="font-size:11px;color:#333;font-weight:600;">900</span>
+          <span style="font-size:11px;color:#333;font-weight:600;">1500</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-card">
+    <div class="chart-header">
+      <div>
+        <div class="card-label">CO&#8322; trend</div>
+        <div class="chart-sublabel">last 20 readings from ThingSpeak</div>
+      </div>
+      <div class="legend">
+        <div class="leg-item">
+          <div class="leg-dot" style="background:#5CB85C"></div>normal
+        </div>
+        <div class="leg-item">
+          <div class="leg-dot" style="background:#FFA726"></div>warning
+        </div>
+        <div class="leg-item">
+          <div class="leg-dot" style="background:#EC1840"></div>danger
+        </div>
+      </div>
+    </div>
+    <div style="position:relative; width:100%; height:200px;">
+      <canvas id="co2chart"></canvas>
+    </div>
+    <div class="chart-footer">
+      threshold lines: warning 1000 ppm &nbsp;&middot;&nbsp; danger 2000 ppm
+    </div>
+  </div>
+
+  <div class="last-updated">
+    last updated: <span id="lastUpdated">--</span>
+    &nbsp;&middot;&nbsp; auto-refreshes every 5 seconds
+  </div>
+
+<script>
+  function getColor(v) {
+    return v >= 2000 ? '#EC1840' : v >= 1000 ? '#FFA726' : '#5CB85C';
+  }
+  function getStatus(v) {
+    if (v >= 2000) return ['p-danger',  '#EC1840', 'Danger'];
+    if (v >= 1000) return ['p-warning', '#FFA726', 'Warning'];
+    return              ['p-normal',  '#5CB85C', 'Normal'];
+  }
+
+  function updateGauge(ppm) {
+    const ratio = Math.min(Math.max((ppm - 400) / 1100, 0), 1);
+    const angle = -180 + ratio * 180;
+    const rad   = angle * Math.PI / 180;
+    const nx    = 110 + 88 * Math.cos(rad);
+    const ny    = 130 + 88 * Math.sin(rad);
+    document.getElementById('gneedle').setAttribute('x2', nx.toFixed(1));
+    document.getElementById('gneedle').setAttribute('y2', ny.toFixed(1));
+    const offset = Math.round(299 * (1 - ratio * 0.95));
+    document.getElementById('garc').setAttribute('stroke-dashoffset', offset);
+  }
+
+  function updateUI(ppm) {
+    const color           = getColor(ppm);
+    const [cls, col, txt] = getStatus(ppm);
+
+    document.getElementById('bignum').textContent     = ppm;
+    document.getElementById('bignum').style.color     = color;
+    document.getElementById('accent').style.background = color;
+
+    const pill = document.getElementById('pill');
+    pill.className = 'pill ' + cls;
+    document.getElementById('pdot').style.background = col;
+    document.getElementById('ptext').textContent     = txt;
+
+    updateGauge(ppm);
+
+    const banner = document.getElementById('banner');
+    if (ppm >= 2000) {
+      banner.className   = 'banner banner-danger';
+      banner.textContent = 'DANGER — CO2 level critical (' + ppm + ' ppm). Open windows immediately.';
+    } else if (ppm >= 1000) {
+      banner.className   = 'banner banner-warning';
+      banner.textContent = 'WARNING — CO2 level elevated (' + ppm + ' ppm). Consider ventilating.';
+    } else {
+      banner.className   = 'banner';
+      banner.textContent = '';
+    }
+  }
+
+  // Chart
+  const ctx   = document.getElementById('co2chart').getContext('2d');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#0066B3',
+        borderWidth: 2,
+        pointBackgroundColor: [],
+        pointBorderColor: [],
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        tension: 0.4,
+        fill: true,
+        backgroundColor: 'rgba(0,102,179,0.05)'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: c => c.parsed.y + ' ppm' },
+          backgroundColor: 'rgba(255,255,255,0.95)',
+          titleColor: '#333', bodyColor: '#555',
+          borderColor: '#ddd', borderWidth: 1
+        }
+      },
+      scales: {
+        y: {
+          min: 0,
+          max: 1500,
+          ticks: {
+            font: { size: 11 }, color: '#333',
+            callback: v => v + ' ppm'
+          },
+          grid: { color: 'rgba(0,0,0,0.04)' }
+        },
+        x: {
+          ticks: {
+            font: { size: 11 }, color: '#333',
+            maxRotation: 45, autoSkip: true, maxTicksLimit: 10
+          },
+          grid: { display: false }
+        }
+      }
+    }
+  });
+
+  // ThingSpeak API details
+  const TS_CHANNEL  = '3309549';
+  const TS_READ_KEY = 'N6IBO13VF2NIE715';
+  const TS_BASE     = 'https://api.thingspeak.com/channels/' + TS_CHANNEL;
+
+  async function fetchLatest() {
+    try {
+      const res  = await fetch(TS_BASE + '/feeds/last.json?api_key=' + TS_READ_KEY);
+      if (!res.ok) return;
+      const data = await res.json();
+      const ppm  = parseInt(data.field1);
+      if (!isNaN(ppm)) updateUI(ppm);
+    } catch (e) { console.warn('fetchLatest:', e); }
+  }
+
+  async function fetchHistory() {
+    try {
+      const res  = await fetch(TS_BASE + '/feeds.json?api_key=' + TS_READ_KEY + '&results=20');
+      if (!res.ok) return;
+      const json = await res.json();
+      const feeds = json.feeds.filter(f => f.field1 !== null);
+
+      const labels = feeds.map(f => {
+        const t = new Date(f.created_at);
+        return t.getHours().toString().padStart(2,'0') + ':' +
+               t.getMinutes().toString().padStart(2,'0') + ':' +
+               t.getSeconds().toString().padStart(2,'0');
+      });
+      const values = feeds.map(f => parseInt(f.field1));
+      const colors = values.map(getColor);
+
+      chart.data.labels                            = labels;
+      chart.data.datasets[0].data                 = values;
+      chart.data.datasets[0].pointBackgroundColor = colors;
+      chart.data.datasets[0].pointBorderColor     = colors;
+      chart.update();
+
+      if (values.length > 0) {
+        document.getElementById('smin').textContent = Math.min(...values);
+        document.getElementById('smax').textContent = Math.max(...values);
+      }
+      document.getElementById('lastUpdated').textContent =
+        new Date().toLocaleTimeString();
+
+    } catch (e) { console.warn('fetchHistory:', e); }
+  }
+
+  function tick() {
+    document.getElementById('clock').textContent =
+      new Date().toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+  }
+
+  tick();
+  setInterval(tick, 1000);
+  fetchLatest();
+  fetchHistory();
+  setInterval(() => { fetchLatest(); fetchHistory(); }, 5000);
+</script>
+</body>
+</html>
