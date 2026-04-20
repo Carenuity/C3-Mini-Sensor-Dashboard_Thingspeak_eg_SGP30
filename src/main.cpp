@@ -76,7 +76,7 @@ void setup() {
   pixels.setBrightness(5);
   pixels.fill(pixels.Color(255, 255, 255));
   pixels.show();
-
+  
   // SGP30 init
   delay(1000);
   if (!sgp30.begin()) {

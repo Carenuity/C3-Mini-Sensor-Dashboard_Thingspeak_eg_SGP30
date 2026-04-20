@@ -1,0 +1,211 @@
+/*
+ * CO2 Monitor — ESP32-C3 + SGP30 + SSD1306 + NeoPixel
+ * Uses the WiFiManager library (tzapu/tablatronix) for credential management.
+ *
+ * Install via PlatformIO:  lib_deps = tzapu/WiFiManager
+ * Install via Arduino:     Library Manager → search "WiFiManager" by tzapu
+ *
+ * First-boot / reset flow
+ * 
+ *  1. Flash the firmware — device boots, finds no saved Wi-Fi.
+ *  2. WiFiManager opens a hotspot called "CO2-Setup".
+ *  3. Connect to "CO2-Setup" (password: 12345678).
+ *  4. A captive-portal page opens automatically (or go to 192.168.4.1).
+ *  5. Pick your Wi-Fi network, enter password, fill in:
+ *       • ThingSpeak Channel ID
+ *       • ThingSpeak Write API Key
+ *  6. Hit Save → ESP32 connects, stores everything, and starts monitoring.
+ *
+ * To force reconfiguration: hold BOOT button for 3 s at power-on.
+
+ */
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <WiFiManager.h>          // tzapu/WiFiManager
+#include <Adafruit_SGP30.h>
+#include <Adafruit_NeoPixel.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <HTTPClient.h>
+
+//  Pins
+#define SDA_PIN       8
+#define SCL_PIN       10
+#define SCREEN_WIDTH  128
+#define SCREEN_HEIGHT 64
+
+#define LED_PIN       4
+#define NUMPIXELS     12
+
+#define BOOT_BTN_PIN  9           // BOOT / GPIO9 on most ESP32-C3 boards
+
+//  ThingSpeak 
+const char* TS_SERVER = "http://api.thingspeak.com/update";
+
+//  Hardware objects 
+Adafruit_SSD1306   display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+Adafruit_NeoPixel  pixels(NUMPIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_SGP30     sgp30;
+
+//  Runtime state ─
+int16_t co2ppm = 400;
+
+// WiFiManager custom parameters (stored in its own NVS partition)
+WiFiManagerParameter param_ts_channel("channel", "ThingSpeak Channel ID",  "", 16);
+WiFiManagerParameter param_ts_wkey   ("wkey",    "ThingSpeak Write API Key", "", 20);
+
+//  OLED helper ─
+void oledMsg(const char* l1, const char* l2 = "",
+             const char* l3 = "", const char* l4 = "") {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0,  0); display.println(l1);
+  display.setCursor(0, 16); display.println(l2);
+  display.setCursor(0, 32); display.println(l3);
+  display.setCursor(0, 48); display.println(l4);
+  display.display();
+}
+
+//  WiFiManager callback — called when portal opens ─
+void onConfigPortalStart(WiFiManager*) {
+  Serial.println("Config portal started");
+  oledMsg("== SETUP MODE ==", "Connect to WiFi:", "CO2-Setup", "pw: 12345678");
+  pixels.fill(pixels.Color(0, 0, 255));  // blue = waiting for config
+  pixels.show();
+}
+
+//  SETUP
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
+
+  // OLED
+  Wire.begin(SDA_PIN, SCL_PIN);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 not found");
+  }
+  oledMsg("Booting CO2 Meter");
+
+  // NeoPixels
+  pixels.begin();
+  pixels.setBrightness(5);
+  pixels.fill(pixels.Color(255, 255, 255));
+  pixels.show();
+
+  // SGP30 
+  delay(500);
+  if (!sgp30.begin()) {
+    oledMsg("SGP30 not found!", "check wiring");
+    Serial.println("SGP30 not found!");
+    while (1) delay(1000);
+  }
+  oledMsg("SGP30 found", "warming up 15 s...");
+  delay(15000);
+  Serial.println("SGP30 ready");
+
+  //  Force portal if BOOT held for 3 s 
+  if (digitalRead(BOOT_BTN_PIN) == LOW) {
+    oledMsg("Hold 3s to reset", "WiFi + TS config");
+    unsigned long t0 = millis();
+    while (digitalRead(BOOT_BTN_PIN) == LOW && millis() - t0 < 3000) delay(100);
+    if (millis() - t0 >= 3000) {
+      WiFiManager wm;
+      wm.resetSettings();          // wipes saved SSID/pass + custom params
+      oledMsg("Config cleared!", "rebooting...");
+      delay(2000);
+      ESP.restart();
+    }
+  }
+
+  //  WiFiManager setup 
+  WiFiManager wm;
+
+  // Register the two extra fields shown on the portal form
+  wm.addParameter(&param_ts_channel);
+  wm.addParameter(&param_ts_wkey);
+
+  // Show setup instructions on OLED + blue LEDs when portal opens
+  wm.setAPCallback(onConfigPortalStart);
+
+  // Auto-reboot if nobody configures within 3 minutes
+  wm.setConfigPortalTimeout(180);
+
+  oledMsg("Connecting WiFi...", "if stuck connect", "to: CO2-Setup", "pw: 12345678");
+
+  // autoConnect:
+  //   • Saved credentials exist  → connect silently, skip portal entirely.
+  //   • No credentials / failed  → open "CO2-Setup" portal, block here until the user saves their details.
+  if (!wm.autoConnect("CO2-Setup", "12345678")) {
+    Serial.println("WiFiManager timed out — rebooting");
+    oledMsg("Connect timeout", "rebooting...");
+    delay(3000);
+    ESP.restart();
+  }
+
+  //  Connected 
+  Serial.println("WiFi connected!");
+  Serial.print("IP: "); Serial.println(WiFi.localIP());
+  Serial.print("ThingSpeak channel: ");
+  Serial.println(param_ts_channel.getValue());
+
+  oledMsg("WiFi connected!",
+          WiFi.localIP().toString().c_str(),
+          (String("TS ch: ") + param_ts_channel.getValue()).c_str());
+
+  pixels.fill(pixels.Color(0, 255, 0));  // green = all good
+  pixels.show();
+  delay(2000);
+}
+
+//  LOOP
+void loop() {
+  // SGP30 measurement
+  if (sgp30.IAQmeasure()) {
+    co2ppm = sgp30.eCO2;
+  } else {
+    Serial.println("SGP30 measurement failed");
+  }
+  Serial.printf("eCO2: %d ppm\n", co2ppm);
+
+  // NeoPixel colour — green (safe) → red (danger)
+  uint8_t r = constrain(map(co2ppm, 800, 2000,   0, 255), 0, 255);
+  uint8_t g = constrain(map(co2ppm, 800, 2000, 255,   0), 0, 255);
+  pixels.fill(pixels.Color(r, g, 0));
+  pixels.show();
+
+  // OLED
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 0);  display.println("eCO2 Level:");
+  display.setTextSize(2);
+  display.setCursor(0, 16); display.print(co2ppm); display.println(" ppm");
+  display.setTextSize(1);
+  display.setCursor(0, 50); display.print("IP: ");
+  display.println(WiFi.localIP());
+  display.display();
+
+  // ThingSpeak POST
+  if (WiFi.status() == WL_CONNECTED) {
+    String wkey = String(param_ts_wkey.getValue());
+    if (wkey.length() > 0) {
+      HTTPClient http;
+      String url = String(TS_SERVER) +
+                   "?api_key=" + wkey +
+                   "&field1="  + String(co2ppm);
+      http.begin(url);
+      int code = http.GET();
+      Serial.printf("ThingSpeak: %d\n", code);
+      http.end();
+    } else {
+      Serial.println("No ThingSpeak key — skipping upload");
+    }
+  } else {
+    Serial.println("WiFi lost — skipping ThingSpeak");
+  }
+
+  delay(5000);
+}
